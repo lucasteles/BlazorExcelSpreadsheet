@@ -2,6 +2,9 @@
 @inject HttpClient Http
 
 @using Telerik.Blazor.Components.Grid
+@using OfficeOpenXml
+@using OfficeOpenXml.Style
+@inject IJSRuntime JS
 
 <h1>Weather forecast</h1>
 
@@ -12,28 +15,21 @@
     <p><em>Loading...</em></p>
 }
 else
-{
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Date</th>
-                <th>Temp. (C)</th>
-                <th>Temp. (F)</th>
-                <th>Summary</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var forecast in forecasts)
-            {
-                <tr>
-                    <td>@forecast.Date.ToShortDateString()</td>
-                    <td>@forecast.TemperatureC</td>
-                    <td>@forecast.TemperatureF</td>
-                    <td>@forecast.Summary</td>
-                </tr>
-            }
-        </tbody>
-    </table>
+{ <TelerikGrid Data=@forecasts
+               Pageable="true" Sortable="true" Filterable="true">
+        <TelerikGridColumns>
+            <TelerikGridColumn Field="Date">
+                <Template>
+                    @((context as WeatherForecast).Date.ToShortDateString())
+                </Template>
+            </TelerikGridColumn>
+            <TelerikGridColumn Field="TemperatureC" Title="Temp C'" />
+            <TelerikGridColumn Field="TemperatureF" Title="Temp F'" />
+            <TelerikGridColumn Field="Summary" />
+        </TelerikGridColumns>
+    </TelerikGrid>
+
+    <button onclick="@DownlodFile">Download</button>
 }
 
 @functions {
@@ -42,6 +38,46 @@ else
     protected override async Task OnInitAsync()
     {
         forecasts = await Http.GetJsonAsync<WeatherForecast[]>("sample-data/weather.json");
+    }
+
+    async Task DownlodFile()
+    {
+        using (var package = new ExcelPackage())
+        {
+            var worksheet = package.Workbook.Worksheets.Add("Forecasts");
+
+            // Use LINQ to project data into the worksheet
+            var tableBody = worksheet.Cells["B2:B2"].LoadFromCollection(
+                from f in forecasts
+                select new { f.Date, f.TemperatureC, TemperatureF = "", f.Summary }, true);
+
+            // Add conditional formatting based on temperature
+            var temperatureCol = tableBody.Offset(1, 1, forecasts.Length, 1);
+            var rule = temperatureCol.ConditionalFormatting.AddThreeColorScale();
+            rule.LowValue.Color = Color.SkyBlue;
+            rule.MiddleValue.Color = Color.White;
+            rule.HighValue.Color = Color.Red;
+
+            // Add Temperature (F) computed via formula
+            worksheet.Cells[3, 4, forecasts.Length + 2, 4].Formula = "C3 * 1.8 + 32";
+            worksheet.Calculate();
+
+            // Formatting
+            var header = worksheet.Cells["B2:E2"];
+            worksheet.DefaultColWidth = 25;
+            worksheet.Cells[3, 2, forecasts.Length + 2, 2].Style.Numberformat.Format = "DDD d MMM yyyy";
+            tableBody.Style.HorizontalAlignment = ExcelHorizontalAlignment.Left;
+            tableBody.Style.Fill.PatternType = ExcelFillStyle.Solid;
+            tableBody.Style.Fill.BackgroundColor.SetColor(Color.WhiteSmoke);
+            tableBody.Style.Border.BorderAround(ExcelBorderStyle.Medium);
+            header.Style.Font.Bold = true;
+            header.Style.Font.Color.SetColor(Color.White);
+            header.Style.Fill.BackgroundColor.SetColor(Color.DarkBlue);
+
+            await JS.SaveAs("forecasts.xlsx", package.GetAsByteArray());
+        }
+
+
     }
 
     class WeatherForecast
